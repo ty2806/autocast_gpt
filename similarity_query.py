@@ -1,3 +1,4 @@
+import csv
 import datetime
 import openai
 import os
@@ -8,15 +9,25 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import backoff
+from datasets import Dataset
 
 # Set up OpenAI API credentials
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
+# load cc news
+dataset_path = "/media/ty2806/data/cc_news"
+dataset = Dataset.load_from_disk(dataset_path)
+print("load dataset from disk")
+
 with open('autocast_competition_test_set.json') as f:
     test_questions = json.load(f)
 
-with open('my_dict1.txt') as f:
-    bing_news = json.load(f)
+similar_news = {}
+with open('final_result_dict.csv') as f:
+    reader = csv.reader(f)
+    for row in reader:
+        if len(row) > 0:
+            similar_news[row[0]] = [int(index) for index in row[1:]]
 
 # Define function to generate text from the API
 def generate_chatgpt_response(model, message):
@@ -52,11 +63,11 @@ def generate_gpt3_response(model, prompt):
 def create_message(user_input):
     message = [
         {"role": "system",
-         "content": "You are a financial analysis assistant AI. Your responsibility is to read news and forecast all kinds of events."},
+         "content": "You are a financial analysis assistant AI. Your responsibility is to read news and forecast all kinds of events. For all answers you will only reply with a number. If you find the question unclear or unfathomable, you will still output a number. When you give your answer, put the number in a pair of <output>."},
         {"role": "user",
          "content": "I will give you some news. Then give you a question to answer. You will try your best to give your answer. Even if you do not know the answer, you must still guess an answer. Do you understand?"},
         {"role": "assistant",
-         "content": "Yes."},
+         "content": "<output>1<output>"},
         {"role": "user",
          "content": user_input}
     ]
@@ -113,11 +124,12 @@ gpt3_model = "text-davinci-003"
 def process_question(test_question):
     question = test_question['background'] + " " + test_question['question']
     news_aggregate = ""
-    for news in bing_news[test_question['id']]:
-        news_aggregate += news+"\n"
+    for news_index in similar_news[test_question['id'][:5]]:
+        news = dataset[news_index]
+        news_aggregate += news['title']+" "+news['description']+"\n"
     user_input = news_aggregate + question + "\n"
     if test_question['qtype'] == 't/f':
-        user_input += "You should choose between 1.yes or 2.no. Give the number in front of yes or no. Remember only output the number and nothing else. If you find the question unclear or unfathomed, you will still output a number."
+        user_input += "You should choose between 1.yes or 2.no. Output 2 float numbers range from 0 to 1 as your confidence score of No and Yes respectively. Remember only output the number and nothing else."
 
     elif test_question['qtype'] == 'mc':
         user_input += "Your Answer should be one of :\n"
